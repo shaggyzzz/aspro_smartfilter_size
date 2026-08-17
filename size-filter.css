@@ -1,0 +1,556 @@
+/*
+ * SizeFilter — стили пикера «Ширина × Длина» для умного фильтра
+ * (Аспро Макс, Битрикс). Подключается вместе с size-filter.js.
+ *
+ * Поле «Выберите размер» открывает попап: на десктопе — выпадающую панель,
+ * на мобильных (≤767px) — шторку снизу.
+ *
+ * Акцентный цвет настраивается переменной --sf-accent; по умолчанию берётся
+ * фирменный цвет темы Аспро (--theme-base-color, на beautyson.ru — #616161).
+ */
+
+.sf-size-picker,
+.sf-popup {
+  --sf-accent: var(--theme-base-color, #616161);
+  --sf-accent-text: #ffffff;
+  --sf-accent-soft: rgba(97, 97, 97, 0.08);
+  --sf-border: #e2e2e8;
+  --sf-muted: #6b6b74; /* контраст ≥4.5:1 на белом */
+  --sf-text: #333333;
+
+  font-size: 13px;
+  color: var(--sf-text);
+}
+
+.bx_filter_parameters_box.sf-enhanced {
+  position: relative; /* попап позиционируется относительно блока фильтра */
+}
+
+/* исходный список чекбоксов остаётся в DOM как источник данных,
+   но убирается из вида (не display:none — Битрикс читает из него данные,
+   а BX.pos() перенесённых чекбоксов должен работать) */
+.bx_filter_parameters_box.sf-enhanced .bx_filter_parameters_box_container {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0);
+  margin: 0 !important;
+  padding: 0 !important;
+  white-space: nowrap;
+}
+
+.bx_filter_parameters_box.sf-enhanced .inner_expand_text {
+  display: none !important;
+}
+
+/* ограничение высоты limited_block больше не нужно — иначе оно обрежет
+   поле/чипсы/сброс. Без !important: inline-стили jQuery slideUp/slideDown
+   (сворачивание группы по клику на заголовок в Аспро) продолжают работать */
+.bx_filter_parameters_box.sf-enhanced .bx_filter_block.limited_block {
+  max-height: none;
+  overflow: visible;
+}
+
+/* штатную всплывашку «Показать N товаров» прячем, пока открыт попап:
+   её текст зеркалится в кнопку внизу попапа */
+.bx_filter_parameters_box.sf-popup-open .bx_filter_container_modef {
+  display: none !important;
+}
+
+/* ---------- поле-триггер ---------- */
+
+.sf-field-wrap { margin: 6px 0 8px; }
+
+.sf-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--sf-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--sf-muted);
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.sf-field:hover { border-color: var(--sf-accent); }
+
+.sf-field-wrap.has-value .sf-field { color: var(--sf-text); border-color: var(--sf-accent); }
+
+.sf-field-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-field-arrow {
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform 0.15s ease;
+}
+
+.sf-popup-open .sf-field-arrow { transform: rotate(180deg); }
+
+/* ---------- чипсы выбранных размеров ---------- */
+
+.sf-chips-row { margin: 0 0 8px; }
+
+.sf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sf-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border: 1px solid var(--sf-accent);
+  background: var(--sf-accent-soft);
+  color: var(--sf-accent);
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.sf-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 17px;
+  line-height: 1;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.sf-chip-x:hover { opacity: 1; }
+
+/* ---------- сброс ---------- */
+
+.sf-reset { margin: 2px 0 6px; }
+
+.sf-reset-link {
+  font-size: 12px;
+  color: var(--sf-muted);
+  border-bottom: 1px dashed currentColor;
+  cursor: pointer;
+}
+
+.sf-reset-link:hover { color: var(--sf-accent); }
+
+/* якоря перенесённых чекбоксов: чекбокс невидим, но занимает площадь якоря,
+   чтобы всплывашка «Показать N товаров» появлялась в осмысленном месте.
+   display:block защищает от шаблонных правил вида input[type=checkbox]{display:none} */
+.sf-anchor-host { position: relative; }
+
+.sf-anchor-host > input[type="checkbox"] {
+  display: block !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  border: 0 !important;
+  padding: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* ---------- попап ---------- */
+
+.sf-popup {
+  display: none;
+  position: absolute;
+  z-index: 250;
+  background: #fff;
+  border: 1px solid var(--sf-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+}
+
+.sf-popup.sf-open {
+  display: block;
+  animation: sf-drop 0.16s ease;
+}
+
+.sf-popup.sf-no-anim,
+.sf-backdrop.sf-no-anim { animation: none !important; }
+
+@keyframes sf-drop {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.sf-popup-inner {
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px 12px;
+}
+
+.sf-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sf-popup-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sf-popup-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  margin: -4px -6px -4px 0;
+  border: 0;
+  background: none;
+  color: var(--sf-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sf-popup-close:hover { color: var(--sf-text); }
+
+.sf-hint {
+  color: var(--sf-muted);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+/* ---------- колонки ширина / длина ---------- */
+
+.sf-cols {
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+.sf-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sf-col-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.sf-listwrap {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.sf-list {
+  /* flex-элемент: на низких экранах сжимается вместе с шторкой и
+     прокручивается внутри — кнопка «Показать N товаров» остаётся видимой */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 292px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #cfcfd6 transparent;
+}
+
+.sf-list::-webkit-scrollbar { width: 4px; }
+.sf-list::-webkit-scrollbar-track { background: transparent; }
+.sf-list::-webkit-scrollbar-thumb { background: #cfcfd6; border-radius: 2px; }
+
+/* градиент-подсказка: ниже есть ещё значения */
+.sf-list-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 26px;
+  background: linear-gradient(rgba(255, 255, 255, 0), #fff);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.sf-listwrap.has-more .sf-list-fade { opacity: 1; }
+
+/* ---------- кнопки значений ---------- */
+
+.sf-item { flex-shrink: 0; }
+
+.sf-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--sf-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--sf-text);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease,
+              color 0.15s ease, box-shadow 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sf-btn:hover:not(:disabled) {
+  border-color: var(--sf-accent);
+  color: var(--sf-accent);
+}
+
+/* контекст: активная ширина или «ожидающая» длина — контурная рамка */
+.sf-btn.is-active,
+.sf-btn.is-active:hover:not(:disabled) {
+  background: #fff;
+  border-color: var(--sf-accent);
+  box-shadow: inset 0 0 0 1px var(--sf-accent);
+  color: var(--sf-accent);
+  font-weight: 600;
+}
+
+/* применённый размер — заливка с галочкой */
+.sf-btn.is-checked,
+.sf-btn.is-checked:hover:not(:disabled) {
+  background: var(--sf-accent);
+  border-color: var(--sf-accent);
+  box-shadow: none;
+  color: var(--sf-accent-text);
+  font-weight: 600;
+}
+
+.sf-btn.is-checked::before {
+  content: '✓';
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sf-btn:disabled {
+  color: #b8b8bf;
+  border-color: #ececf0;
+  background: #fafafb;
+  cursor: default;
+}
+
+.sf-val { font-variant-numeric: tabular-nums; }
+
+.sf-count {
+  font-size: 11px;
+  color: var(--sf-muted);
+}
+
+.sf-btn:disabled .sf-count { color: #b8b8bf; }
+
+.sf-btn.is-checked .sf-count {
+  color: var(--sf-accent-text);
+  opacity: 0.8;
+}
+
+.sf-btn.is-active .sf-count { color: var(--sf-accent); }
+
+.sf-count:empty { display: none; }
+
+/* бейдж на ширине: сколько длин выбрано с этой шириной (в потоке, не
+   absolute — чтобы не обрезался скролл-контейнером) */
+.sf-badge {
+  display: inline-block;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--sf-accent);
+  color: var(--sf-accent-text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+
+.sf-badge:empty { display: none; }
+
+/* у длин в режиме «ширина не выбрана» — точка, если размер с этой длиной уже выбран */
+.sf-list--l .sf-btn.has-checked:not(.is-active):not(.is-checked) .sf-val::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--sf-accent);
+  margin-left: 4px;
+  vertical-align: 2px;
+}
+
+/* ---------- прочие значения (не ШxД) ---------- */
+
+.sf-other { margin-top: 10px; }
+
+.sf-other-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sf-btn--other {
+  width: auto;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+/* ---------- низ попапа ---------- */
+
+.sf-popup-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.sf-apply {
+  border: 0;
+  border-radius: 8px;
+  background: var(--sf-accent);
+  color: var(--sf-accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 36px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.sf-apply:hover { filter: brightness(1.08); }
+
+/* ---------- подложка (только мобильная шторка) ---------- */
+
+.sf-backdrop {
+  display: none;
+  position: fixed;
+  z-index: 100000;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* блокировка прокрутки страницы под открытой шторкой */
+html.sf-lock,
+html.sf-lock body { overflow: hidden !important; }
+
+/* ---------- мобильная версия: шторка снизу ---------- */
+
+@media (max-width: 767px) {
+  .sf-backdrop.sf-open {
+    display: block;
+    animation: sf-fade 0.2s ease;
+  }
+
+  @keyframes sf-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  .sf-popup {
+    position: fixed;
+    z-index: 100001;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    top: auto !important;
+    width: auto !important;
+    max-height: 85vh;
+    border: 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.2);
+  }
+
+  .sf-popup.sf-open {
+    display: flex;
+    flex-direction: column;
+    animation: sf-sheet 0.25s ease;
+  }
+
+  @keyframes sf-sheet {
+    from { transform: translateY(100%); }
+    to   { transform: none; }
+  }
+
+  .sf-popup-inner {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 16px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .sf-popup-title { font-size: 16px; }
+
+  .sf-popup-close {
+    min-width: 40px;
+    min-height: 40px;
+    margin: -8px -10px -8px 0;
+    font-size: 26px;
+  }
+
+  .sf-cols { flex: 1 1 auto; }
+
+  /* колонки занимают всю высоту шторки, прокрутка внутри */
+  .sf-list { max-height: 56vh; }
+
+  .sf-btn { min-height: 42px; font-size: 15px; border-radius: 8px; }
+
+  .sf-count { font-size: 12px; }
+
+  .sf-chip { min-height: 32px; font-size: 13px; }
+
+  .sf-chip-x { min-width: 30px; min-height: 30px; font-size: 20px; }
+
+  .sf-field { min-height: 44px; font-size: 14px; }
+
+  .sf-popup-foot {
+    margin-top: 10px;
+  }
+
+  .sf-apply {
+    width: 100%;
+    min-height: 46px;
+    font-size: 15px;
+  }
+}

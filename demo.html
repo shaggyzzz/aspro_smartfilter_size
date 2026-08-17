@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Демо: фильтр «Размер» — попап Ширина × Длина</title>
+<link rel="stylesheet" href="size-filter.css">
+<style>
+  /* ---- обвязка демо-страницы (имитация сайдбара Аспро) ---- */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Open Sans', Arial, sans-serif;
+    background: #f5f5f7;
+    color: #333;
+    --theme-base-color: #616161; /* как на beautyson.ru */
+  }
+  .page {
+    display: flex;
+    gap: 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 16px;
+  }
+  .sidebar { width: 280px; flex-shrink: 0; }
+  .content { flex: 1; min-width: 0; }
+  .content .stub {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px 24px;
+    color: #6b6b74;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .log {
+    margin-top: 16px;
+    background: #fff;
+    border-radius: 8px;
+    padding: 14px 20px;
+    font: 12px/1.7 Consolas, monospace;
+    color: #666;
+    max-height: 280px;
+    overflow-y: auto;
+    word-break: break-all;
+  }
+  .log b { color: #1f8449; }
+  .log i { color: #b06a00; font-style: normal; }
+
+  @media (max-width: 767px) {
+    .page { flex-direction: column; gap: 16px; padding: 12px; }
+    .sidebar { width: auto; }
+  }
+
+  /* ---- минимальная имитация фильтра Аспро Макс ---- */
+  .bx_filter { background: #fff; border-radius: 8px; padding: 8px 0; }
+  .bx_filter_parameters_box { position: relative; padding: 8px 16px 12px; }
+  .bx_filter_parameters_box_title {
+    font-size: 14px; font-weight: 600; padding: 6px 0 8px; cursor: pointer;
+  }
+  label.bx_filter_param_label { display: block; font-size: 13px; padding: 3px 0; cursor: pointer; }
+  /* как в Аспро: хвост списка скрыт, блок ограничен по высоте */
+  .hidden_values { display: none; }
+  .bx_filter_block.limited_block { max-height: 260px; overflow: hidden; }
+  .inner_expand_text { font-size: 12px; color: #999; cursor: pointer; padding-top: 6px; }
+
+  /* имитация всплывашки «Показать N товаров» */
+  .demo-modef-popup {
+    position: absolute;
+    z-index: 99999;
+    background: #fff;
+    border: 1px solid #e2e2e8;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .demo-modef-popup a { color: var(--theme-base-color); font-weight: 600; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="sidebar">
+    <div class="bx_filter">
+      <form name="MAX_SMART_FILTER" id="demo-filter-form"><!-- сюда генерируется блок фильтра --></form>
+    </div>
+  </div>
+  <div class="content">
+    <div class="stub">
+      <b>Демо фильтра «Размер» → попап «Ширина × Длина»</b><br><br>
+      Слева — реальная разметка умного фильтра Аспро Макс (чекбоксы «ШxД»
+      скрыты и остаются источником данных), поверх неё работает
+      <code>size-filter.js</code>.<br><br>
+      Что попробовать:<br>
+      — нажать «Выберите размер» — откроется попап, как на mnogosna.ru;<br>
+      — выбрать ширину → длину (или наоборот), выбрать несколько размеров;<br>
+      — у ширины 110 доступны только длины 190/195/200 — остальные гаснут;<br>
+      — каждый клик по размеру запускает имитацию ajax Битрикса: через
+      0,4 с весь блок фильтра <i>полностью перерисовывается</i> (как на
+      реальном сайте) — попап и выбор при этом сохраняются;<br>
+      — сузить окно до &lt;768px — попап станет шторкой снизу.
+    </div>
+    <div class="log" id="log"><b>лог smartFilter.click():</b></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Имитация серверной части: генерация точной копии разметки
+// чекбоксов Аспро Макс + «ajax»-перерисовка блока фильтра.
+// Данные (размер, количество) сняты с beautyson.ru/catalog/matrasy/
+// ============================================================
+(function () {
+  var DATA = [
+    ['80x180',45],['80x185',174],['80x186',174],['80x190',394],['80x195',382],
+    ['80x200',394],['90x180',45],['90x185',174],['90x186',174],['90x190',394],
+    ['90x195',382],['90x200',394],['100x180',45],['100x185',45],['100x186',45],
+    ['100x190',200],['100x195',200],['100x200',200],['110x190',155],['110x195',155],
+    ['110x200',155],['120x180',45],['120x185',174],['120x186',174],['120x190',394],
+    ['120x195',382],['120x200',394],['140x180',45],['140x185',174],['140x186',174],
+    ['140x190',393],['140x195',381],['140x200',393],['160x180',45],['160x185',174],
+    ['160x186',174],['160x190',393],['160x195',381],['160x200',393],['180x180',45],
+    ['180x185',174],['180x186',174],['180x190',393],['180x195',381],['180x200',392],
+    ['200x180',45],['200x185',174],['200x186',174],['200x190',365],['200x195',353],
+    ['200x200',364]
+  ];
+  var VISIBLE = 5; // как в Аспро: первые 5 видимы, остальные в .hidden_values
+  var form = document.getElementById('demo-filter-form');
+
+  function idFor(i) { return 'MAX_SMART_FILTER_1185_' + (1000000 + i); }
+
+  function fakeCount(checkedNames) {
+    if (!checkedNames.length) return 0;
+    var sum = 0;
+    DATA.forEach(function (row, i) {
+      if (checkedNames.indexOf(idFor(i)) !== -1) sum += row[1];
+    });
+    return Math.min(sum, 394);
+  }
+
+  // точная копия структуры Аспро Макс (см. исходный HTML фильтра)
+  function renderFilterBox(checkedNames, modefN) {
+    var html =
+      '<div class="bx_filter_parameters_box active" data-expanded="Y" data-prop_code="razmer" data-property_id="1185" data-property_name="Размер">' +
+      '<span data-f="Показать" data-fi="товар" data-fr="товара" data-frm="товаров" class="bx_filter_container_modef">' +
+      (modefN ? '<a href="#">Показать ' + modefN + ' товаров</a>' : '') +
+      '</span>' +
+      '<div class="bx_filter_parameters_box_title">Размер</div>' +
+      '<div class="bx_filter_block limited_block scrollblock">' +
+      '<div class="bx_filter_parameters_box_container">';
+    DATA.forEach(function (row, i) {
+      var id = idFor(i);
+      var last = (i === DATA.length - 1) ? ' last ' : ' ';
+      var checked = checkedNames.indexOf(id) !== -1 ? ' checked' : '';
+      if (i === VISIBLE) html += '<div class="hidden_values">';
+      html +=
+        '<input type="checkbox" value="Y" name="' + id + '" id="' + id + '"' + checked + ' onclick="smartFilter.click(this)">' +
+        '<label data-role="label_' + id + '" class="bx_filter_param_label' + last + '" for="' + id + '">' +
+          '<span class="bx_filter_input_checkbox">' +
+            '<span class="bx_filter_param_text" title="' + row[0] + '">' + row[0] +
+              ' (<span data-role="count_' + id + '">' + row[1] + '</span>)' +
+            '</span>' +
+          '</span>' +
+        '</label>';
+      if (i === DATA.length - 1 && DATA.length > VISIBLE) html += '</div>';
+    });
+    html += '</div>' +
+      '<div class="inner_expand_text"><span class="expand_block">Показать все</span></div>' +
+      '<div class="clb"></div>' +
+      '</div></div>';
+    return html;
+  }
+
+  function currentChecked() {
+    var res = [];
+    var inputs = form.querySelectorAll('input[type="checkbox"]');
+    Array.prototype.forEach.call(inputs, function (inp) {
+      if (inp.checked) res.push(inp.name);
+    });
+    return res;
+  }
+
+  function logLine(html) {
+    var logEl = document.getElementById('log');
+    var line = document.createElement('div');
+    line.innerHTML = html;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // первичная отрисовка
+  form.innerHTML = renderFilterBox([], 0);
+
+  // ---- заглушка умного фильтра Битрикс ----
+  window.smartFilter = {
+    click: function (input) {
+      logLine((input.checked ? '<b>+</b> ' : '&minus; ') + input.name +
+        ' checked=' + input.checked);
+
+      // всплывашка около чекбокса — имитация BX.pos(checkbox):
+      // благодаря переносу чекбокса в якорь пикера координаты осмысленные
+      var old = document.querySelector('.demo-modef-popup');
+      if (old) old.remove();
+      var checkedNames = currentChecked();
+      var n = fakeCount(checkedNames);
+      // при открытом попапе штатная всплывашка скрыта (её текст зеркалится
+      // в кнопку внизу попапа) — ведём себя как реальный сайт
+      var boxEl = input.closest('.bx_filter_parameters_box');
+      var popupOpen = boxEl && boxEl.classList.contains('sf-popup-open');
+      var rect = input.getBoundingClientRect();
+      if ((rect.width || rect.height) && !popupOpen) {
+        var pop = document.createElement('div');
+        pop.className = 'demo-modef-popup';
+        pop.innerHTML = '<a href="#">' +
+          (n ? 'Показать ' + n + ' товаров' : 'Показать все товары') + '</a>';
+        document.body.appendChild(pop);
+        pop.style.left = Math.min(rect.left + window.scrollX, window.innerWidth - pop.offsetWidth - 12) + 'px';
+        pop.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+        setTimeout(function () { pop.remove(); }, 2000);
+      }
+
+      // «ajax»: как Аспро Макс — полная перерисовка блока фильтра
+      setTimeout(function () {
+        form.innerHTML = renderFilterBox(checkedNames, n);
+        logLine('<i>ajax: блок фильтра перерисован (выбрано: ' +
+          checkedNames.length + ')</i>');
+      }, 400);
+    }
+  };
+})();
+</script>
+
+<script src="size-filter.js"></script>
+</body>
+</html>
