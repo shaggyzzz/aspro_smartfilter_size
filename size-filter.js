@@ -14,6 +14,9 @@
  * скрипт автоматически инициализируется заново (MutationObserver), попап
  * при этом переоткрывается, выбранная ширина и прокрутка колонок сохраняются.
  *
+ * На детальной странице тот же попап ставится над селектом SKU Аспро
+ * (.bx_item_detail_size): выбирается одно ТП, срабатывает штатный change.
+ *
  * Настройки — задать window.SizeFilterConfig ДО подключения этого файла.
  * Подробности — в README.md.
  */
@@ -45,7 +48,9 @@
     // пропускается.
     quickTitle: 'Популярные размеры',
     quickSizes: ['160x200', '140x200', '180x200', '90x200'],
-    quickSizeCount: 4
+    quickSizeCount: 4,
+    // попап на детальной (и в карточках с SKU): .bx_item_detail_size
+    skuEnabled: true
   };
 
   // 80x190, 80х190 (рус.), 80×190, 80*190, допускаются дробные: 82,5x190
@@ -165,18 +170,107 @@
     return parseInt(it.countEl.textContent, 10);
   }
 
+  function itemSelected(it) {
+    if (!it) return false;
+    if (it.option) return !!(it.option.selected || it.option.hasAttribute('selected'));
+    if (it.li) return it.li.classList.contains('active');
+    return !!(it.input && it.input.checked);
+  }
+
   function itemDisabled(it) {
-    return it.input.disabled || it.label.classList.contains('disabled');
+    if (!it) return true;
+    if (it.option) return !!it.option.disabled;
+    if (it.li) {
+      return it.li.classList.contains('missing') ||
+        it.li.classList.contains('disabled') ||
+        it.li.classList.contains('unavailable');
+    }
+    return !!(it.input && (it.input.disabled || (it.label && it.label.classList.contains('disabled'))));
   }
 
   // доступен для клика: отмеченный — всегда (чтобы можно было снять),
   // иначе — не disabled и счётчик не равен нулю
   function itemAvailable(it) {
     if (!it) return false;
-    if (it.input.checked) return true;
+    if (itemSelected(it)) return true;
     if (itemDisabled(it)) return false;
     var c = itemCount(it);
     return isNaN(c) || c > 0;
+  }
+
+  function skuOptionRaw(opt) {
+    var title = String(opt.getAttribute('title') || '').replace(/^Размер:\s*/i, '');
+    var cnt = opt.querySelector && opt.querySelector('.cnt');
+    var text = cnt ? cnt.textContent : (opt.textContent || opt.label || '');
+    return stripCount(title || text);
+  }
+
+  function collectSkuItems(box) {
+    var items = [];
+    var select = box.querySelector('select.list_values_wrapper, select');
+    if (select && select.options && select.options.length) {
+      Array.prototype.forEach.call(select.options, function (opt) {
+        var raw = skuOptionRaw(opt);
+        if (!raw) return;
+        items.push({
+          option: opt,
+          select: select,
+          raw: raw,
+          size: parseSize(raw),
+          countEl: null,
+          input: null,
+          label: null
+        });
+      });
+      return items;
+    }
+    var lis = box.querySelectorAll('li.item[data-treevalue], li.item[data-onevalue]');
+    Array.prototype.forEach.call(lis, function (li) {
+      var raw = String(li.getAttribute('title') || li.textContent || '')
+        .replace(/^Размер:\s*/i, '');
+      raw = stripCount(raw);
+      if (!raw) return;
+      items.push({
+        li: li,
+        raw: raw,
+        size: parseSize(raw),
+        countEl: null,
+        input: null,
+        label: null
+      });
+    });
+    return items;
+  }
+
+  function triggerSelectChange(select) {
+    if (window.jQuery) {
+      window.jQuery(select).trigger('change');
+      return;
+    }
+    var ev;
+    try {
+      ev = new Event('change', { bubbles: true });
+    } catch (e) {
+      ev = document.createEvent('HTMLEvents');
+      ev.initEvent('change', true, false);
+    }
+    select.dispatchEvent(ev);
+  }
+
+  // Аспро читает option[selected] (атрибут), не только selectedIndex
+  function applySkuValue(it) {
+    if (it.option && it.select) {
+      var opts = it.select.options;
+      for (var i = 0; i < opts.length; i++) {
+        opts[i].removeAttribute('selected');
+        opts[i].selected = false;
+      }
+      it.option.setAttribute('selected', 'selected');
+      it.option.selected = true;
+      triggerSelectChange(it.select);
+      return;
+    }
+    if (it.li) it.li.click();
   }
 
   /* ---------- построение пикера для одного блока фильтра ---------- */
@@ -234,10 +328,61 @@
     }
   }
 
+  function enhanceSku(box, C) {
+    if (box.hasAttribute('data-sf-enhanced')) return;
+
+    var skuWrap = box.closest ? (box.closest('.wrapper_sku') || box.closest('.bx_catalog_item_scu')) : null;
+    var productId = skuWrap ? (skuWrap.getAttribute('data-id') || '') : '';
+    var propId = 'sku-' + productId + '-' + (box.getAttribute('data-id') || box.id || '');
+
+    var container = box.querySelector('.bx_size_scroller_container') ||
+      box.querySelector('.bx_size') || box;
+    var block = box;
+
+    var items = collectSkuItems(box);
+    var sized = items.filter(function (it) { return !!it.size; });
+    if (sized.length < 2) {
+      box.setAttribute('data-sf-enhanced', 'N');
+      box.classList.add('sf-native');
+      releaseOpenState(propId);
+      return;
+    }
+    var other = items.filter(function (it) { return !it.size; });
+
+    box.setAttribute('data-sf-enhanced', 'Y');
+
+    try {
+      var mem = stateStore[propId];
+      if (mem && mem.inst && mem.inst.rebind(box, block, container, sized, other)) {
+        box.classList.remove('sf-native');
+        box.classList.add('sf-enhanced', 'sf-sku');
+        return;
+      }
+      buildPicker(box, block, container, sized, other, C, propId);
+      box.classList.remove('sf-native');
+      box.classList.add('sf-enhanced', 'sf-sku');
+    } catch (e) {
+      box.setAttribute('data-sf-enhanced', 'N');
+      box.classList.add('sf-native');
+      releaseOpenState(propId);
+      if (stateStore[propId]) stateStore[propId].inst = null;
+      Array.prototype.forEach.call(
+        box.querySelectorAll('.sf-size-picker, .sf-popup, .sf-backdrop'),
+        function (el) { if (el.parentNode) el.parentNode.removeChild(el); }
+      );
+      throw e;
+    }
+  }
+
   function buildPicker(box, block, container, sized, other, C, propId) {
     var mem = stateStore[propId] = stateStore[propId] || {
       selW: null, selL: null, open: false, scrollW: 0, scrollL: 0
     };
+
+    var isSku = false;
+    sized.forEach(function (it) {
+      if (it.option || it.li) isSku = true;
+    });
 
     var modefEl = box.querySelector('.bx_filter_container_modef');
 
@@ -254,8 +399,8 @@
     function comboAt(w, l) { return combos[sizeKey({ w: w, l: l })] || null; }
     function checkedItems() {
       var res = [];
-      sized.forEach(function (it) { if (it.input.checked) res.push(it); });
-      other.forEach(function (it) { if (it.input.checked) res.push(it); });
+      sized.forEach(function (it) { if (itemSelected(it)) res.push(it); });
+      other.forEach(function (it) { if (itemSelected(it)) res.push(it); });
       return res;
     }
 
@@ -302,6 +447,10 @@
     reset.appendChild(resetLink);
     resetLink.addEventListener('click', resetAll);
     root.appendChild(reset);
+    if (isSku) {
+      chipsRow.style.display = 'none';
+      reset.style.display = 'none';
+    }
 
     /* ---------- DOM: попап ---------- */
 
@@ -552,8 +701,14 @@
     // В сам попап и в чипсы (пересоздаются в renderAll) чекбокс не попадает —
     // иначе chips.innerHTML='' удалил бы его из документа и из формы.
     function toggleItem(it, anchorHost) {
+      if (isSku) {
+        if (!itemSelected(it)) applySkuValue(it);
+        renderAll();
+        closePopup();
+        return;
+      }
       var host = anchorHost || fieldWrap;
-      if (C.moveInputs && it.input.parentNode !== host) {
+      if (C.moveInputs && it.input && it.input.parentNode !== host) {
         host.appendChild(it.input);
       }
       it.input.click(); // переключает checked и вызывает smartFilter.click(this)
@@ -564,7 +719,7 @@
       if (selL !== null) {
         // длину выбрали первой — клик по ширине завершает пару
         var it = comboAt(w, selL);
-        if (it && it.input.checked) {
+        if (it && itemSelected(it)) {
           // пара уже выбрана — не снимаем её, просто входим в контекст ширины
           selW = w; selL = null; remember();
           renderAll();
@@ -590,7 +745,9 @@
     function onLengthClick(l) {
       if (selW !== null) {
         var it = comboAt(selW, l);
-        if (itemAvailable(it)) toggleItem(it);
+        if (!itemAvailable(it)) return;
+        if (isSku && itemSelected(it)) { closePopup(); return; }
+        toggleItem(it);
         return;
       }
       selL = (selL === l) ? null : l;
@@ -599,6 +756,7 @@
     }
 
     function resetAll() {
+      if (isSku) return;
       var list = checkedItems();
       if (!list.length) return;
       // все, кроме последнего, снимаем тихо; последний — через click(),
@@ -637,20 +795,21 @@
         function (inp) { container.appendChild(inp); }
       );
       chipsList.innerHTML = '';
-      checked.forEach(function (it) {
-        var chip = h('span', 'sf-chip');
-        chip.appendChild(h('span', 'sf-chip-text', chipLabel(it)));
-        var x = h('button', 'sf-chip-x');
-        x.type = 'button';
-        x.setAttribute('aria-label', 'Убрать размер ' + it.raw);
-        x.innerHTML = '&times;';
-        // якорь — персистентный chipsRow, а не сам чипс (чипсы пересоздаются)
-        x.addEventListener('click', function () { toggleItem(it, chipsRow); });
-        chip.appendChild(x);
-        chipsList.appendChild(chip);
-      });
-      chipsRow.style.display = checked.length ? '' : 'none';
-      reset.style.display = checked.length > 1 ? '' : 'none';
+      if (!isSku) {
+        checked.forEach(function (it) {
+          var chip = h('span', 'sf-chip');
+          chip.appendChild(h('span', 'sf-chip-text', chipLabel(it)));
+          var x = h('button', 'sf-chip-x');
+          x.type = 'button';
+          x.setAttribute('aria-label', 'Убрать размер ' + it.raw);
+          x.innerHTML = '&times;';
+          x.addEventListener('click', function () { toggleItem(it, chipsRow); });
+          chip.appendChild(x);
+          chipsList.appendChild(chip);
+        });
+        chipsRow.style.display = checked.length ? '' : 'none';
+        reset.style.display = checked.length > 1 ? '' : 'none';
+      }
       hint.style.display = (selW === null && selL === null && !checked.length) ? '' : 'none';
 
       // колонка ширин
@@ -680,7 +839,7 @@
         var enabled, isChecked = false, cnt = NaN;
         if (selW !== null) {
           enabled = itemAvailable(it);
-          isChecked = !!(it && it.input.checked);
+          isChecked = !!(it && itemSelected(it));
           cnt = itemCount(it);
         } else {
           enabled = widths.some(function (w) { return itemAvailable(comboAt(w, l)); });
@@ -698,8 +857,8 @@
       // прочие значения
       other.forEach(function (it) {
         if (!it._btn) return;
-        it._btn.classList.toggle('is-checked', it.input.checked);
-        it._btn.setAttribute('aria-pressed', it.input.checked ? 'true' : 'false');
+        it._btn.classList.toggle('is-checked', itemSelected(it));
+        it._btn.setAttribute('aria-pressed', itemSelected(it) ? 'true' : 'false');
         it._btn.disabled = !itemAvailable(it);
       });
 
@@ -707,8 +866,8 @@
         var it = holder.it;
         var btn = holder.btn;
         if (!it || !btn) return;
-        btn.classList.toggle('is-checked', it.input.checked);
-        btn.setAttribute('aria-pressed', it.input.checked ? 'true' : 'false');
+        btn.classList.toggle('is-checked', itemSelected(it));
+        btn.setAttribute('aria-pressed', itemSelected(it) ? 'true' : 'false');
         btn.disabled = !itemAvailable(it);
       });
 
@@ -857,7 +1016,7 @@
       sized = newSized;
       other = newOther;
 
-      block.insertBefore(root, container);
+      mountRoot(block, container, root);
       box.appendChild(popup);
       box.appendChild(backdrop);
 
@@ -890,7 +1049,7 @@
 
     /* ---------- монтирование ---------- */
 
-    block.insertBefore(root, container);
+    mountRoot(block, container, root);
     box.appendChild(popup);
     box.appendChild(backdrop);
 
@@ -908,7 +1067,15 @@
     }
   }
 
-  /* ---------- инициализация и повторная инициализация после ajax ---------- */
+  function mountRoot(block, container, root) {
+    if (container && container !== block && container.parentNode === block) {
+      block.insertBefore(root, container);
+    } else if (container && container.parentNode) {
+      container.parentNode.insertBefore(root, container);
+    } else {
+      block.appendChild(root);
+    }
+  }
 
   function boxSelector(C, raw) {
     return C.propCodes.map(function (code) {
@@ -919,23 +1086,38 @@
 
   function enhanceAll() {
     var C = config();
-    if (!C.propCodes || !C.propCodes.length) return;
-    var boxes = document.querySelectorAll(boxSelector(C, false));
-    Array.prototype.forEach.call(boxes, function (box) {
-      try {
-        enhance(box, C);
-      } catch (e) {
-        // упавший блок сразу возвращаем к штатному виду
-        if (!box.classList.contains('sf-enhanced')) box.classList.add('sf-native');
-        if (window.console && console.error) console.error('SizeFilter:', e);
-      }
-    });
+    if (C.propCodes && C.propCodes.length) {
+      var boxes = document.querySelectorAll(boxSelector(C, false));
+      Array.prototype.forEach.call(boxes, function (box) {
+        try {
+          enhance(box, C);
+        } catch (e) {
+          if (!box.classList.contains('sf-enhanced')) box.classList.add('sf-native');
+          if (window.console && console.error) console.error('SizeFilter:', e);
+        }
+      });
+    }
+
+    if (C.skuEnabled !== false) {
+      var skuBoxes = document.querySelectorAll('.bx_item_detail_size');
+      Array.prototype.forEach.call(skuBoxes, function (box) {
+        try {
+          enhanceSku(box, C);
+        } catch (e) {
+          if (!box.classList.contains('sf-enhanced')) box.classList.add('sf-native');
+          if (window.console && console.error) console.error('SizeFilter SKU:', e);
+        }
+      });
+    }
 
     // блок с открытым попапом пропал из ajax-ответа или не пересобрался —
     // снять блокировку прокрутки, чтобы страница не осталась замороженной
     for (var pid in stateStore) {
       if (!stateStore[pid].open) continue;
-      var b = document.querySelector(
+      var inst = stateStore[pid].inst;
+      var b = inst && inst.getBox ? inst.getBox() : null;
+      if (b && document.body.contains(b) && b.getAttribute('data-sf-enhanced') === 'Y') continue;
+      b = document.querySelector(
         '.bx_filter_parameters_box[data-property_id="' + pid + '"],' +
         '.bx_filter_parameters_box[data-prop_code="' + pid + '"]'
       );
@@ -952,19 +1134,26 @@
   // мелькает и сайдбар не прыгает ни при загрузке, ни после ajax.
   // Если построить пикер не удалось, блоку возвращается видимость (sf-native).
   function injectPrehide(C) {
-    var boxes = C.propCodes.map(function (code) {
+    var hide =
+      '{position:absolute !important;width:1px !important;height:1px !important;' +
+      'overflow:hidden !important;clip:rect(0 0 0 0);margin:0 !important;padding:0 !important;}';
+    var css = '';
+    var boxes = (C.propCodes || []).map(function (code) {
       return '.bx_filter_parameters_box[data-prop_code="' + code + '"]' +
         ':not(.sf-enhanced):not(.sf-native)';
     });
-    if (!boxes.length) return;
+    if (boxes.length) {
+      css += boxes.map(function (b) { return b + ' .bx_filter_parameters_box_container'; }).join(',') + hide;
+      css += boxes.map(function (b) { return b + ' .inner_expand_text'; }).join(',') +
+        '{display:none !important;}';
+    }
+    if (C.skuEnabled !== false) {
+      css += '.bx_item_detail_size:not(.sf-enhanced):not(.sf-native) .bx_size_scroller_container' + hide;
+    }
+    if (!css) return;
     var st = document.createElement('style');
     st.setAttribute('data-sf-prehide', '');
-    st.textContent =
-      boxes.map(function (b) { return b + ' .bx_filter_parameters_box_container'; }).join(',') +
-      '{position:absolute !important;width:1px !important;height:1px !important;' +
-      'overflow:hidden !important;clip:rect(0 0 0 0);margin:0 !important;padding:0 !important;}' +
-      boxes.map(function (b) { return b + ' .inner_expand_text'; }).join(',') +
-      '{display:none !important;}';
+    st.textContent = css;
     (document.head || document.documentElement).appendChild(st);
   }
 
@@ -977,7 +1166,11 @@
     safetyTimer = setTimeout(function () {
       safetyTimer = null;
       var C = config();
-      var boxes = document.querySelectorAll(boxSelector(C, true));
+      var sel = [];
+      if (C.propCodes && C.propCodes.length) sel.push(boxSelector(C, true));
+      if (C.skuEnabled !== false) sel.push('.bx_item_detail_size:not([data-sf-enhanced])');
+      if (!sel.length) return;
+      var boxes = document.querySelectorAll(sel.join(','));
       Array.prototype.forEach.call(boxes, function (box) {
         box.classList.add('sf-native');
       });
@@ -999,9 +1192,18 @@
           for (var j = 0; j < added.length; j++) {
             var n = added[j];
             if (n.nodeType !== 1) continue;
-            if ((n.matches && n.matches('.bx_filter_parameters_box:not([data-sf-enhanced])')) ||
-                (n.querySelector && n.querySelector('.bx_filter_parameters_box:not([data-sf-enhanced])')) ||
-                (n.closest && n.closest('.bx_filter_parameters_box:not([data-sf-enhanced])'))) {
+            if ((n.matches && (
+                  n.matches('.bx_filter_parameters_box:not([data-sf-enhanced])') ||
+                  n.matches('.bx_item_detail_size:not([data-sf-enhanced])')
+                )) ||
+                (n.querySelector && (
+                  n.querySelector('.bx_filter_parameters_box:not([data-sf-enhanced])') ||
+                  n.querySelector('.bx_item_detail_size:not([data-sf-enhanced])')
+                )) ||
+                (n.closest && (
+                  n.closest('.bx_filter_parameters_box:not([data-sf-enhanced])') ||
+                  n.closest('.bx_item_detail_size:not([data-sf-enhanced])')
+                ))) {
               enhanceAll();
               return;
             }

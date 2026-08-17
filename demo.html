@@ -76,6 +76,18 @@
     white-space: nowrap;
   }
   .demo-modef-popup a { color: var(--theme-base-color); font-weight: 600; text-decoration: none; }
+
+  .product-demo {
+    margin-top: 16px;
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px 20px 20px;
+    max-width: 360px;
+  }
+  .product-demo h3 { margin: 0 0 12px; font-size: 15px; }
+  .bx_item_section_name { display: block; font-size: 14px; font-weight: 600; padding: 4px 0 8px; }
+  .bx_item_detail_size { position: relative; }
+  .bx_size_scroller_container select { width: 100%; min-height: 36px; }
 </style>
 </head>
 <body>
@@ -101,7 +113,22 @@
       реальном сайте) — попап и выбор при этом сохраняются;<br>
       — сузить окно до &lt;768px — попап станет шторкой снизу.
     </div>
-    <div class="log" id="log"><b>лог smartFilter.click():</b></div>
+    <div class="product-demo">
+      <h3>Детальная: выбор ТП (SKU)</h3>
+      <div class="bx_catalog_item_scu wrapper_sku sku_in_detail" data-id="19016">
+        <div class="item_wrapper">
+          <div class="bx_item_detail_size" data-display_type="SELECT" data-id="1185">
+            <span class="show_class bx_item_section_name"><span>Размер<span class="sku_mdash">&mdash;</span><span class="val">90x186</span></span></span>
+            <div class="bx_size_scroller_container">
+              <div class="bx_size">
+                <select id="demo-sku-select" class="list_values_wrapper"></select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="log" id="log"><b>лог:</b></div>
   </div>
 </div>
 
@@ -228,6 +255,29 @@
       }, 400);
     }
   };
+
+  var skuSelect = document.getElementById('demo-sku-select');
+  if (skuSelect) {
+    DATA.forEach(function (row, i) {
+      var opt = document.createElement('option');
+      opt.setAttribute('data-treevalue', '1185_' + (1043 + i));
+      opt.setAttribute('data-onevalue', String(1043 + i));
+      opt.setAttribute('title', 'Размер: ' + row[0]);
+      opt.textContent = row[0];
+      if (row[0] === '90x186') {
+        opt.selected = true;
+        opt.setAttribute('selected', 'selected');
+      }
+      skuSelect.appendChild(opt);
+    });
+    skuSelect.addEventListener('change', function () {
+      var opt = skuSelect.options[skuSelect.selectedIndex];
+      var valEl = document.querySelector('.product-demo .val');
+      var raw = opt ? String(opt.getAttribute('title') || opt.textContent || '').replace(/^Размер:\s*/i, '') : '';
+      if (valEl) valEl.textContent = raw;
+      logLine('<b>SKU</b> ' + raw);
+    });
+  }
 })();
 </script>
 
