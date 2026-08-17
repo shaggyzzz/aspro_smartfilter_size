@@ -247,6 +247,22 @@
   margin: 0 0 8px;
 }
 
+/* популярные размеры — вверху попапа, одним кликом пара Ш×Д */
+.sf-quick-block { margin: 0 0 12px; }
+
+.sf-quick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.sf-quick-btn {
+  min-height: 36px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 /* ---------- колонки ширина / длина ---------- */
 
 .sf-cols {
@@ -543,6 +559,8 @@ html.sf-lock body { overflow: hidden !important; }
   .sf-chip-x { min-width: 30px; min-height: 30px; font-size: 20px; }
 
   .sf-field { min-height: 44px; font-size: 14px; }
+
+  .sf-quick-btn { min-height: 42px; font-size: 14px; }
 
   .sf-popup-foot {
     margin-top: 10px;

@@ -4,7 +4,8 @@
  * Превращает список чекбоксов «ШxД» (80x190, 160x200, …) свойства «Размер»
  * в поле «Выберите размер», открывающее попап с двумя колонками
  * «Ширина, см» / «Длина, см» — как на mnogosna.ru.
- * На десктопе попап — выпадающая панель у поля, на мобильных — шторка снизу.
+ * В попапе сверху — популярные размеры (160×200, …), одним кликом;
+ * остальные выбираются в колонках «Ширина» / «Длина».
  *
  * Принцип работы: исходные чекбоксы остаются в DOM (скрываются стилями)
  * и служат источником данных. Клик по кнопке размера находит соответствующий
@@ -38,7 +39,13 @@
     moveInputs: true,
     // ширина попапа на десктопе
     popupWidth: 344,
-    mobileMedia: '(max-width: 767px)'
+    mobileMedia: '(max-width: 767px)',
+    // популярные размеры вверху попапа — клик сразу включает пару Ш×Д.
+    // Пустой массив — блок не показывается. Нет в текущем фильтре — пункт
+    // пропускается.
+    quickTitle: 'Популярные размеры',
+    quickSizes: ['160x200', '140x200', '180x200', '90x200'],
+    quickSizeCount: 4
   };
 
   // 80x190, 80х190 (рус.), 80×190, 80*190, допускаются дробные: 82,5x190
@@ -106,6 +113,28 @@
   function fmt(n) { return String(n).replace('.', ','); }
 
   function isMobile() { return !!(mqMobile && mqMobile.matches); }
+
+  function sizeKey(sz) { return sz.w + '|' + sz.l; }
+
+  // какие из configured quickSizes реально есть в текущем блоке фильтра
+  function resolveQuickItems(sized, C) {
+    var specs = C.quickSizes;
+    if (!specs || !specs.length) return [];
+    var limit = parseInt(C.quickSizeCount, 10);
+    if (!(limit > 0)) limit = 4;
+    var byKey = {};
+    sized.forEach(function (it) {
+      if (it.size) byKey[sizeKey(it.size)] = it;
+    });
+    var out = [];
+    for (var i = 0; i < specs.length && out.length < limit; i++) {
+      var sz = parseSize(specs[i]);
+      if (!sz) continue;
+      var it = byKey[sizeKey(sz)];
+      if (it && out.indexOf(it) === -1) out.push(it);
+    }
+    return out;
+  }
 
   /* ---------- чтение данных из исходного фильтра ---------- */
 
@@ -215,14 +244,14 @@
     /* модель: комбинации, уникальные ширины и длины */
     var combos = {}, widths = [], lengths = [];
     sized.forEach(function (it) {
-      combos[it.size.w + '|' + it.size.l] = it;
+      combos[sizeKey(it.size)] = it;
       if (widths.indexOf(it.size.w) === -1) widths.push(it.size.w);
       if (lengths.indexOf(it.size.l) === -1) lengths.push(it.size.l);
     });
     widths.sort(numAsc);
     lengths.sort(numAsc);
 
-    function comboAt(w, l) { return combos[w + '|' + l] || null; }
+    function comboAt(w, l) { return combos[sizeKey({ w: w, l: l })] || null; }
     function checkedItems() {
       var res = [];
       sized.forEach(function (it) { if (it.input.checked) res.push(it); });
@@ -295,6 +324,35 @@
     closeBtn.innerHTML = '&times;';
     head.appendChild(closeBtn);
     inner.appendChild(head);
+
+    var quickHolders = [];
+    var quickItems = resolveQuickItems(sized, C);
+    if (quickItems.length) {
+      var quickBlock = h('div', 'sf-quick-block');
+      if (C.quickTitle) quickBlock.appendChild(h('div', 'sf-col-title', C.quickTitle));
+      var quickRow = h('div', 'sf-quick');
+      quickItems.forEach(function (it) {
+        var btn = h('button', 'sf-btn sf-quick-btn');
+        btn.type = 'button';
+        btn.appendChild(h('span', 'sf-val', fmt(it.size.w) + '×' + fmt(it.size.l)));
+        btn.setAttribute('aria-label', 'Размер ' + fmt(it.size.w) + '×' + fmt(it.size.l));
+        var holder = { it: it, btn: btn };
+        btn._sfHolder = holder;
+        btn.addEventListener('click', function () {
+          var cur = holder.it;
+          if (!itemAvailable(cur)) return;
+          // чекбокс в fieldWrap, не в попап — иначе перекрыл бы всплывашку
+          selW = cur.size.w;
+          selL = null;
+          remember();
+          toggleItem(cur);
+        });
+        quickRow.appendChild(btn);
+        quickHolders.push(holder);
+      });
+      quickBlock.appendChild(quickRow);
+      inner.appendChild(quickBlock);
+    }
 
     var hint = h('div', 'sf-hint', C.hintText);
     inner.appendChild(hint);
@@ -645,6 +703,15 @@
         it._btn.disabled = !itemAvailable(it);
       });
 
+      quickHolders.forEach(function (holder) {
+        var it = holder.it;
+        var btn = holder.btn;
+        if (!it || !btn) return;
+        btn.classList.toggle('is-checked', it.input.checked);
+        btn.setAttribute('aria-pressed', it.input.checked ? 'true' : 'false');
+        btn.disabled = !itemAvailable(it);
+      });
+
       // кнопка внизу попапа зеркалит битриксовую «Показать N товаров»
       var modefText = modefEl ? stripModef(modefEl.textContent) : '';
       applyBtn.textContent = modefText || C.doneText;
@@ -719,11 +786,11 @@
       // например «80x190» и «80×190» — считаем поштучно)
       var oldKeys = {};
       sized.forEach(function (it) {
-        key = it.size.w + '|' + it.size.l;
+        key = sizeKey(it.size);
         oldKeys[key] = (oldKeys[key] || 0) + 1;
       });
       for (i = 0; i < newSized.length; i++) {
-        key = newSized[i].size.w + '|' + newSized[i].size.l;
+        key = sizeKey(newSized[i].size);
         if (!oldKeys[key]) return false;
         oldKeys[key]--;
       }
@@ -764,7 +831,7 @@
       );
 
       combos = {};
-      newSized.forEach(function (it) { combos[it.size.w + '|' + it.size.l] = it; });
+      newSized.forEach(function (it) { combos[sizeKey(it.size)] = it; });
       var pool = other.slice();
       newOther.forEach(function (it) {
         for (var i = 0; i < pool.length; i++) {
@@ -772,6 +839,17 @@
             it._btn = pool[i]._btn;
             if (it._btn && it._btn._sfHolder) it._btn._sfHolder.it = it;
             pool[i] = null;
+            break;
+          }
+        }
+      });
+      quickHolders.forEach(function (holder) {
+        var old = holder.it;
+        if (!old || !old.size) return;
+        var key = sizeKey(old.size);
+        for (var qi = 0; qi < newSized.length; qi++) {
+          if (sizeKey(newSized[qi].size) === key) {
+            holder.it = newSized[qi];
             break;
           }
         }
