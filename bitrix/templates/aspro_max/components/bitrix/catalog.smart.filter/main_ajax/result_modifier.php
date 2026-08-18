@@ -28,11 +28,36 @@ if($arResult['ITEMS'])
 			$arPropInlineName[$arItem['ID']] = $arItem['NAME'];
 		}
 
-		if(isset($arItem['PRICE']) && $arItem['PRICE'])
+		// Price slider bounds → 100 RUB (floor MIN, ceil MAX). Only $arItem['PRICE']
+		// (retail price), never numeric props like height (DISPLAY_TYPE A).
+		// VALUE = full range; FILTERED_VALUE = range after other filters (ajax).
+		// HTML_VALUE = user-selected range — do not touch (old URLs with kopecks still open).
+		// Skip if this item was unset above, so we do not recreate an empty price block.
+		if (isset($arResult['ITEMS'][$key]) && !empty($arItem['PRICE']))
 		{
+			$priceStep = 100;
+			foreach (array('MIN', 'MAX') as $bound)
+			{
+				if (empty($arResult['ITEMS'][$key]['VALUES'][$bound]))
+					continue;
+
+				foreach (array('VALUE', 'FILTERED_VALUE') as $valKey)
+				{
+					if (!isset($arResult['ITEMS'][$key]['VALUES'][$bound][$valKey])
+						|| $arResult['ITEMS'][$key]['VALUES'][$bound][$valKey] === '')
+						continue;
+
+					$n = (float)$arResult['ITEMS'][$key]['VALUES'][$bound][$valKey];
+					$rounded = ($bound === 'MIN')
+						? floor($n / $priceStep) * $priceStep
+						: ceil($n / $priceStep) * $priceStep;
+					$arResult['ITEMS'][$key]['VALUES'][$bound][$valKey] = (string)$rounded;
+				}
+			}
+
 			if (
-				(isset($arItem['VALUES']['MIN']['HTML_VALUE']) && $arItem['VALUES']['MIN']['HTML_VALUE'])
-				&& (isset($arItem['VALUES']['MAX']['HTML_VALUE']) && $arItem['VALUES']['MAX']['HTML_VALUE'])
+				!empty($arItem['VALUES']['MIN']['HTML_VALUE'])
+				&& !empty($arItem['VALUES']['MAX']['HTML_VALUE'])
 			) {
 				$arResult['PRICE_SET'] = 'Y';
 				break;

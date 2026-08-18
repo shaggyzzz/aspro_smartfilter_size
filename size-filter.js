@@ -275,6 +275,24 @@
 
   /* ---------- построение пикера для одного блока фильтра ---------- */
 
+  function removePickerNodes(box, propId) {
+    if (box) {
+      Array.prototype.forEach.call(
+        box.querySelectorAll('.sf-size-picker, .sf-popup, .sf-backdrop'),
+        function (el) { if (el.parentNode) el.parentNode.removeChild(el); }
+      );
+    }
+    if (!propId || !document.body) return;
+    Array.prototype.forEach.call(
+      document.body.querySelectorAll('.sf-popup, .sf-backdrop'),
+      function (el) {
+        if (el.getAttribute('data-sf-prop') === propId && el.parentNode) {
+          el.parentNode.removeChild(el);
+        }
+      }
+    );
+  }
+
   function enhance(box, C) {
     if (box.hasAttribute('data-sf-enhanced')) return;
 
@@ -312,6 +330,7 @@
         box.classList.add('sf-enhanced');
         return;
       }
+      if (mem && mem.inst && mem.inst.destroy) mem.inst.destroy();
       buildPicker(box, block, container, sized, other, C, propId);
       box.classList.remove('sf-native');
       box.classList.add('sf-enhanced');
@@ -319,11 +338,13 @@
       box.setAttribute('data-sf-enhanced', 'N');
       box.classList.add('sf-native');
       releaseOpenState(propId);
-      if (stateStore[propId]) stateStore[propId].inst = null;
-      Array.prototype.forEach.call(
-        box.querySelectorAll('.sf-size-picker, .sf-popup, .sf-backdrop'),
-        function (el) { if (el.parentNode) el.parentNode.removeChild(el); }
-      );
+      if (stateStore[propId]) {
+        if (stateStore[propId].inst && stateStore[propId].inst.destroy) {
+          stateStore[propId].inst.destroy();
+        }
+        stateStore[propId].inst = null;
+      }
+      removePickerNodes(box, propId);
       throw e;
     }
   }
@@ -358,6 +379,7 @@
         box.classList.add('sf-enhanced', 'sf-sku');
         return;
       }
+      if (mem && mem.inst && mem.inst.destroy) mem.inst.destroy();
       buildPicker(box, block, container, sized, other, C, propId);
       box.classList.remove('sf-native');
       box.classList.add('sf-enhanced', 'sf-sku');
@@ -365,11 +387,13 @@
       box.setAttribute('data-sf-enhanced', 'N');
       box.classList.add('sf-native');
       releaseOpenState(propId);
-      if (stateStore[propId]) stateStore[propId].inst = null;
-      Array.prototype.forEach.call(
-        box.querySelectorAll('.sf-size-picker, .sf-popup, .sf-backdrop'),
-        function (el) { if (el.parentNode) el.parentNode.removeChild(el); }
-      );
+      if (stateStore[propId]) {
+        if (stateStore[propId].inst && stateStore[propId].inst.destroy) {
+          stateStore[propId].inst.destroy();
+        }
+        stateStore[propId].inst = null;
+      }
+      removePickerNodes(box, propId);
       throw e;
     }
   }
@@ -460,6 +484,7 @@
     popup.setAttribute('role', 'dialog');
     popup.setAttribute('aria-modal', 'true');
     popup.setAttribute('aria-label', C.popupTitle);
+    popup.setAttribute('data-sf-prop', propId);
     popup.tabIndex = -1;
 
     var inner = h('div', 'sf-popup-inner');
@@ -583,14 +608,29 @@
     inner.appendChild(foot);
 
     var backdrop = h('div', 'sf-backdrop');
+    backdrop.setAttribute('data-sf-prop', propId);
 
     /* ---------- открытие / закрытие попапа ---------- */
 
     var isOpen = false;
 
+    // На мобильных шторка в body: иначе #mobilefilter { overflow:hidden; width:320px }
+    // в Safari превращает position:fixed в клип по панели и режет справа.
+    function syncPopupHost() {
+      var host = isMobile() ? document.body : box;
+      if (popup.parentNode !== host) host.appendChild(popup);
+      if (backdrop.parentNode !== host) host.appendChild(backdrop);
+    }
+
+    function destroyPickerDom() {
+      [root, popup, backdrop].forEach(function (el) {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      });
+    }
+
     function positionPopup() {
+      syncPopupHost();
       if (isMobile()) {
-        // мобильная шторка позиционируется чистым CSS
         popup.style.top = '';
         popup.style.left = '';
         popup.style.width = '';
@@ -645,6 +685,7 @@
       if (isOpen) return;
       isOpen = true;
       mem.open = true;
+      syncPopupHost();
       positionPopup();
       box.classList.add('sf-popup-open');
       popup.classList.add('sf-open');
@@ -1017,8 +1058,7 @@
       other = newOther;
 
       mountRoot(block, container, root);
-      box.appendChild(popup);
-      box.appendChild(backdrop);
+      syncPopupHost();
 
       observeSync();
 
@@ -1044,14 +1084,14 @@
 
     mem.inst = {
       getBox: function () { return box; },
-      rebind: rebind
+      rebind: rebind,
+      destroy: destroyPickerDom
     };
 
     /* ---------- монтирование ---------- */
 
     mountRoot(block, container, root);
-    box.appendChild(popup);
-    box.appendChild(backdrop);
+    syncPopupHost();
 
     renderAll();
 
