@@ -172,7 +172,9 @@
 
   function itemSelected(it) {
     if (!it) return false;
-    if (it.option) return !!(it.option.selected || it.option.hasAttribute('selected'));
+    // только свойство selected: атрибут остаётся на опции, выбранной при
+    // рендере, — Аспро читает его как состояние «до клика» (см. applySkuValue)
+    if (it.option) return !!it.option.selected;
     if (it.li) return it.li.classList.contains('active');
     return !!(it.input && it.input.checked);
   }
@@ -242,6 +244,49 @@
     return items;
   }
 
+  // Аспро грузит обработчики выбора ТП лениво: select_offer.min.js (делегат
+  // change/click + SelectOfferProp) и select_offer_detail.min.js (обновление
+  // детальной по onFinalActionSKUInfo) подтягиваются через iAppear, когда
+  // блок .sku_in_detail попал в вьюпорт. Наш пикер готов раньше — первый клик
+  // уходил в пустоту (change без обработчика), со второго уже работало.
+  // Лечим с двух сторон: грузим скрипты сами сразу при инициализации пикера
+  // и не шлём change/click, пока обработчик не появился.
+  function ensureSkuScripts() {
+    var tpl = (window.arAsproOptions && window.arAsproOptions.SITE_TEMPLATE_PATH) ||
+      '/bitrix/templates/aspro_max';
+    var need = [];
+    if (!('SelectOfferProp' in window)) {
+      need.push(tpl + '/js/select_offer.min.js', tpl + '/js/select_offer_func.min.js');
+    }
+    if (!(window.appAspro && window.appAspro.skuDetailJSLoad)) {
+      need.push(tpl + '/js/select_offer_detail.min.js');
+    }
+    if (!need.length) return;
+    if (typeof window.loadScripts === 'function') {
+      // тот же путь, что у Аспро (добавит ?v=MODULE_VERSION);
+      // BX.loadScript не загружает один URL дважды
+      try { window.loadScripts(need); return; } catch (e) { /* fallback ниже */ }
+    }
+    need.forEach(function (src) {
+      if (document.querySelector('script[src^="' + src + '"]')) return;
+      var s = document.createElement('script');
+      s.src = src;
+      (document.head || document.documentElement).appendChild(s);
+    });
+  }
+
+  // выполнит fn, когда обработчики выбора ТП загружены; если за ~6 секунд
+  // не появились (сеть, чужая сборка) — выполняет как есть, хуже не будет
+  function whenSkuReady(el, fn) {
+    var needDetail = !!(el && el.closest && el.closest('.product-main'));
+    (function poll(tries) {
+      var ready = ('SelectOfferProp' in window) &&
+        (!needDetail || (window.appAspro && window.appAspro.skuDetailJSLoad));
+      if (ready || tries <= 0) { fn(); return; }
+      setTimeout(function () { poll(tries - 1); }, 100);
+    })(60);
+  }
+
   function triggerSelectChange(select) {
     if (window.jQuery) {
       window.jQuery(select).trigger('change');
@@ -257,20 +302,25 @@
     select.dispatchEvent(ev);
   }
 
-  // Аспро читает option[selected] (атрибут), не только selectedIndex
+  // Меняем ТОЛЬКО свойство selected, как нативный выбор в селекте.
+  // Атрибут selected не трогаем: SelectOfferProp Аспро берёт состояние
+  // «до клика» из option[selected] (на первом клике; дальше — из
+  // data('selected'), которое сохраняет сам), а «после» — из option:selected,
+  // и при совпадении выходит без обновления (if (D === e) return).
+  // Перенос атрибута на новую опцию делал «до» = «после» — первый клик
+  // не менял цену, работало только со второго.
   function applySkuValue(it) {
     if (it.option && it.select) {
-      var opts = it.select.options;
-      for (var i = 0; i < opts.length; i++) {
-        opts[i].removeAttribute('selected');
-        opts[i].selected = false;
-      }
-      it.option.setAttribute('selected', 'selected');
-      it.option.selected = true;
-      triggerSelectChange(it.select);
+      it.option.selected = true; // остальные опции браузер снимет сам
+      // SelectOfferProp читает option:selected в момент события, поэтому
+      // отложенный change обработает уже выставленное состояние
+      whenSkuReady(it.select, function () { triggerSelectChange(it.select); });
       return;
     }
-    if (it.li) it.li.click();
+    if (it.li) {
+      var li = it.li;
+      whenSkuReady(li, function () { li.click(); });
+    }
   }
 
   /* ---------- построение пикера для одного блока фильтра ---------- */
@@ -369,6 +419,10 @@
       return;
     }
     var other = items.filter(function (it) { return !it.size; });
+
+    // не ждём ленивую загрузку Аспро (iAppear по .sku_in_detail) — к первому
+    // клику по размеру обработчик выбора ТП должен быть уже загружен
+    ensureSkuScripts();
 
     box.setAttribute('data-sf-enhanced', 'Y');
 
@@ -753,6 +807,11 @@
         host.appendChild(it.input);
       }
       it.input.click(); // переключает checked и вызывает smartFilter.click(this)
+      // вернуть чекбокс в контейнер, чтобы он не потерялся при
+      // перерисовке фильтра после ajax
+      if (it.input && it.input.parentNode !== container) {
+        container.appendChild(it.input);
+      }
       renderAll();
     }
 
@@ -826,6 +885,13 @@
         fieldText.textContent = C.selectedText + ': ' + checked.length;
         fieldWrap.classList.add('has-value');
       }
+
+      // страховка: вернуть все перенесённые чекбоксы в контейнер,
+      // иначе при перерисовке фильтра Битрикс не найдёт их и они потеряются
+      Array.prototype.forEach.call(
+        root.querySelectorAll('.sf-anchor-host > input[type="checkbox"]'),
+        function (inp) { container.appendChild(inp); }
+      );
 
       // чипсы выбранных размеров.
       // страховка: если чей-то чекбокс оказался внутри пересоздаваемого
