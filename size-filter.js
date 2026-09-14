@@ -343,6 +343,112 @@
     );
   }
 
+  /* ---------- страховка от композитного кеша на мобильной карточке ---------- */
+
+  // Композит Битрикса (core_frame_cache) на мобильной детальной заменяет
+  // продуктовую область разметкой БЕЗ блока выбора размера: select и
+  // offers-json исчезают из DOM, покупатель не может выбрать размер.
+  // Это происходит и без пикера (десктоп не страдает: там динамическая
+  // область приходит с блоком). Держим ссылки на живые узлы и после
+  // зачистки возвращаем их в видимый .product-main перед .prices_block —
+  // дальше штатный конвейер пикера пересоберёт поле, а родная механика
+  // Аспро (SelectOfferProp/ChangeInfo) снова найдёт селект и offers-json
+  // и будет менять цену ajax-ом, как на десктопе.
+  var skuKeeps = [];
+
+  function registerSkuKeep(box, skuWrap, propId) {
+    var wrapOuter = null;
+    if (skuWrap && skuWrap.closest) wrapOuter = skuWrap.closest('.sku_props');
+    wrapOuter = wrapOuter || skuWrap || box;
+    var pm = box.closest ? box.closest('.product-main') : null;
+    var tpl = pm ? pm.querySelector('.offers-template-json') : null;
+    for (var i = 0; i < skuKeeps.length; i++) {
+      if (skuKeeps[i].propId === propId) {
+        skuKeeps[i].box = box;
+        skuKeeps[i].wrapOuter = wrapOuter;
+        if (tpl) skuKeeps[i].tpl = tpl;
+        return;
+      }
+    }
+    skuKeeps.push({ propId: propId, box: box, wrapOuter: wrapOuter, tpl: tpl });
+  }
+
+  // видимый product-main с ценой — куда возвращать блок размера
+  function findSkuRestoreHost() {
+    var mains = document.querySelectorAll('.product-main');
+    for (var j = 0; j < mains.length; j++) {
+      var pb = mains[j].querySelector('.prices_block');
+      if (pb && mains[j].offsetWidth > 0) return { host: mains[j], pricesEl: pb };
+    }
+    return null;
+  }
+
+  // Захватить блок не успели (композит из браузерного хранилища или
+  // оптимизатор Аспро отложил наш скрипт) — забираем полный HTML страницы
+  // повторным запросом (сервер отдаёт его с блоком размера даже когда
+  // композит на клиенте вырезал блок) и вставляем нужные узлы из него.
+  var skuFetchTried = false;
+  function fetchSkuFallback() {
+    if (skuFetchTried || !window.fetch || !window.DOMParser) return;
+    var spot = findSkuRestoreHost();
+    if (!spot) return;
+    skuFetchTried = true;
+    fetch(location.href, { credentials: 'same-origin' })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        if (document.querySelector('.bx_item_detail_size')) return;
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var box = doc.querySelector('.bx_item_detail_size');
+        if (!box) return;
+        var wrap = box.closest('.bx_catalog_item_scu') || box;
+        var outer = wrap.closest('.sku_props') || wrap;
+        var tpl = doc.querySelector('.offers-template-json');
+        var s = findSkuRestoreHost();
+        if (!s) return;
+        if (tpl) s.pricesEl.parentNode.insertBefore(document.importNode(tpl, true), s.pricesEl);
+        s.pricesEl.parentNode.insertBefore(document.importNode(outer, true), s.pricesEl);
+        rescan(); // штатный конвейер построит пикер по вставленному блоку
+      })
+      .catch(function () { /* нет сети — остаёмся как есть */ });
+  }
+
+  function restoreSkuBlocks() {
+    var restored = 0;
+    if (!document.body) return restored;
+    // блок жив (или уже восстановлен, или композит принёс свежий) — не мешаем
+    if (document.querySelector('.bx_item_detail_size')) return restored;
+    for (var i = 0; i < skuKeeps.length; i++) {
+      var k = skuKeeps[i];
+      if (!k.wrapOuter || document.body.contains(k.wrapOuter)) continue;
+
+      // только ВИДИМЫЙ product-main с ценой: вставка в скрытый десктопный
+      // блок «съела» бы восстановление (guard выше посчитал бы блок живым);
+      // если видимого ещё нет — подождём, триггеры вызовут нас снова
+      var spot = findSkuRestoreHost();
+      if (!spot) continue;
+      var pricesEl = spot.pricesEl;
+
+      var pid = k.propId;
+      if (stateStore[pid] && stateStore[pid].inst && stateStore[pid].inst.destroy) {
+        stateStore[pid].inst.destroy();
+        stateStore[pid].inst = null;
+      }
+      releaseOpenState(pid);
+      removePickerNodes(k.box, pid);
+      k.box.removeAttribute('data-sf-enhanced');
+      k.box.classList.remove('sf-enhanced', 'sf-native', 'sf-sku');
+      if (k.tpl && !document.body.contains(k.tpl)) {
+        pricesEl.parentNode.insertBefore(k.tpl, pricesEl);
+      }
+      pricesEl.parentNode.insertBefore(k.wrapOuter, pricesEl);
+      restored++;
+    }
+    // восстановить нечем (скрипт исполнился позже зачистки композитом,
+    // захват не успел) — дотянуть блок повторным запросом страницы
+    if (!restored) fetchSkuFallback();
+    return restored;
+  }
+
   function enhance(box, C) {
     if (box.hasAttribute('data-sf-enhanced')) return;
 
@@ -405,6 +511,11 @@
     var skuWrap = box.closest ? (box.closest('.wrapper_sku') || box.closest('.bx_catalog_item_scu')) : null;
     var productId = skuWrap ? (skuWrap.getAttribute('data-id') || '') : '';
     var propId = 'sku-' + productId + '-' + (box.getAttribute('data-id') || box.id || '');
+
+    // страховка от композита Битрикса: на мобильной карточке
+    // core_frame_cache заменяет продуктовую область разметкой без блока
+    // размера — запоминаем живые узлы, чтобы вернуть их (restoreSkuBlocks)
+    registerSkuKeep(box, skuWrap, propId);
 
     var container = box.querySelector('.bx_size_scroller_container') ||
       box.querySelector('.bx_size') || box;
@@ -1205,6 +1316,7 @@
     }
 
     if (C.skuEnabled !== false) {
+      restoreSkuBlocks();
       var skuBoxes = document.querySelectorAll('.bx_item_detail_size');
       Array.prototype.forEach.call(skuBoxes, function (box) {
         try {
@@ -1272,6 +1384,12 @@
     safetyTimer = setTimeout(function () {
       safetyTimer = null;
       var C = config();
+      // страховка: все триггеры восстановления промахнулись (композит
+      // вставил лэйаут до появления видимого host) — пробуем ещё раз
+      if (C.skuEnabled !== false && restoreSkuBlocks()) {
+        enhanceAll();
+        return;
+      }
       var sel = [];
       if (C.propCodes && C.propCodes.length) sel.push(boxSelector(C, true));
       if (C.skuEnabled !== false) sel.push('.bx_item_detail_size:not([data-sf-enhanced])');
@@ -1313,6 +1431,28 @@
               enhanceAll();
               return;
             }
+            // композит вставил мобильную карточку без блока размера —
+            // вернуть сохранённый блок (restoreSkuBlocks в enhanceAll)
+            if (skuKeeps.length &&
+                ((n.matches && n.matches('.prices_block, .product-main')) ||
+                 (n.querySelector && n.querySelector('.prices_block'))) &&
+                !document.querySelector('.bx_item_detail_size')) {
+              rescan();
+              return;
+            }
+          }
+          // композит вырезал блок размера (мобильная карточка) — восстановить
+          var removed = muts[i].removedNodes;
+          for (var r = 0; r < removed.length; r++) {
+            var rn = removed[r];
+            if (rn.nodeType !== 1) continue;
+            if (skuKeeps.length &&
+                ((rn.matches && rn.matches('.bx_item_detail_size')) ||
+                 (rn.querySelector && rn.querySelector('.bx_item_detail_size'))) &&
+                !document.querySelector('.bx_item_detail_size')) {
+              rescan();
+              return;
+            }
           }
         }
       }).observe(document.body, { childList: true, subtree: true });
@@ -1326,6 +1466,33 @@
   var C0 = config();
   if (window.matchMedia) mqMobile = window.matchMedia(C0.mobileMedia);
   injectPrehide(C0);
+
+  // Композит может вырезать блок размера раньше boot (DOMContentLoaded) —
+  // ловим .bx_item_detail_size ещё во время парсинга HTML (этот скрипт
+  // выполняется в head, скрипт композита — внизу страницы плюс сетевой
+  // запрос, так что мы всегда успеваем первыми) и сразу запоминаем узлы
+  // для restoreSkuBlocks.
+  if (C0.skuEnabled !== false && window.MutationObserver && document.documentElement) {
+    (function () {
+      var mo = new MutationObserver(function (muts) {
+        for (var i = 0; i < muts.length; i++) {
+          var added = muts[i].addedNodes;
+          for (var j = 0; j < added.length; j++) {
+            var n = added[j];
+            if (n.nodeType !== 1 || !n.className) continue;
+            if (String(n.className).indexOf('bx_item_detail_size') === -1) continue;
+            var skuWrap = n.closest ? (n.closest('.wrapper_sku') || n.closest('.bx_catalog_item_scu')) : null;
+            var productId = skuWrap ? (skuWrap.getAttribute('data-id') || '') : '';
+            registerSkuKeep(n, skuWrap,
+              'sku-' + productId + '-' + (n.getAttribute('data-id') || n.id || ''));
+          }
+        }
+      });
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+      // после boot регистрацию ведёт enhanceSku
+      document.addEventListener('DOMContentLoaded', function () { mo.disconnect(); });
+    })();
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
