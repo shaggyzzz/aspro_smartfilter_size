@@ -407,6 +407,11 @@
         if (!s) return;
         if (tpl) s.pricesEl.parentNode.insertBefore(document.importNode(tpl, true), s.pricesEl);
         s.pricesEl.parentNode.insertBefore(document.importNode(outer, true), s.pricesEl);
+        // блок покупки («В корзину», «Купить в 1 клик») композит тоже вырезал
+        var buy = doc.querySelector('.offer_buy_block');
+        if (buy && !s.host.querySelector('.offer_buy_block, .to-cart, .basket_item_add')) {
+          s.pricesEl.parentNode.insertBefore(document.importNode(buy, true), s.pricesEl.nextSibling);
+        }
         rescan(); // штатный конвейер построит пикер по вставленному блоку
       })
       .catch(function () { /* нет сети — остаёмся как есть */ });
@@ -442,6 +447,18 @@
       }
       pricesEl.parentNode.insertBefore(k.wrapOuter, pricesEl);
       restored++;
+
+      // композит уносит с мобильной карточки и блок покупки (счётчик,
+      // «В корзину», «Купить в 1 клик») — возвращаем его после цены.
+      // Соседа ищем лениво: wrapOuter отцеплен вместе с родителем,
+      // поддерево которого сохранилось
+      if (!k.buyEl && k.wrapOuter.parentElement) {
+        k.buyEl = k.wrapOuter.parentElement.querySelector('.offer_buy_block');
+      }
+      if (k.buyEl && !document.body.contains(k.buyEl) &&
+          !spot.host.querySelector('.offer_buy_block, .to-cart, .basket_item_add')) {
+        pricesEl.parentNode.insertBefore(k.buyEl, pricesEl.nextSibling);
+      }
     }
     // восстановить нечем (скрипт исполнился позже зачистки композитом,
     // захват не успел) — дотянуть блок повторным запросом страницы
