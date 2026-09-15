@@ -362,15 +362,20 @@
     wrapOuter = wrapOuter || skuWrap || box;
     var pm = box.closest ? box.closest('.product-main') : null;
     var tpl = pm ? pm.querySelector('.offers-template-json') : null;
+    // блок покупки того же товара; при захвате во время парсинга он ещё
+    // не распарсен (идёт после блока размера) — дозаполнится при повторной
+    // регистрации из enhanceSku или лениво в restoreSkuBlocks
+    var buyEl = pm ? pm.querySelector('.offer_buy_block') : null;
     for (var i = 0; i < skuKeeps.length; i++) {
       if (skuKeeps[i].propId === propId) {
         skuKeeps[i].box = box;
         skuKeeps[i].wrapOuter = wrapOuter;
         if (tpl) skuKeeps[i].tpl = tpl;
+        if (buyEl) skuKeeps[i].buyEl = buyEl;
         return;
       }
     }
-    skuKeeps.push({ propId: propId, box: box, wrapOuter: wrapOuter, tpl: tpl });
+    skuKeeps.push({ propId: propId, box: box, wrapOuter: wrapOuter, tpl: tpl, buyEl: buyEl });
   }
 
   // видимый product-main с ценой — куда возвращать блок размера
@@ -450,10 +455,15 @@
 
       // композит уносит с мобильной карточки и блок покупки (счётчик,
       // «В корзину», «Купить в 1 клик») — возвращаем его после цены.
-      // Соседа ищем лениво: wrapOuter отцеплен вместе с родителем,
-      // поддерево которого сохранилось
-      if (!k.buyEl && k.wrapOuter.parentElement) {
-        k.buyEl = k.wrapOuter.parentElement.querySelector('.offer_buy_block');
+      // Ленивый поиск: поднимаемся по предкам отсоединённого дерева —
+      // у товаров с двумя свойствами ТП (размер + цвет) offer_buy_block
+      // лежит на несколько уровней выше .sku_props
+      if (!k.buyEl) {
+        var anc = k.wrapOuter.parentElement;
+        for (var up = 0; up < 6 && anc && !k.buyEl; up++) {
+          k.buyEl = anc.querySelector('.offer_buy_block');
+          anc = anc.parentElement;
+        }
       }
       if (k.buyEl && !document.body.contains(k.buyEl) &&
           !spot.host.querySelector('.offer_buy_block, .to-cart, .basket_item_add')) {
