@@ -378,6 +378,13 @@
     skuKeeps.push({ propId: propId, box: box, wrapOuter: wrapOuter, tpl: tpl, buyEl: buyEl });
   }
 
+  // Замечание про вид кнопки: родной мобильный шаблон Аспро использует
+  // counter_wrapp big, но big требует JS-обвязки, которую Аспро вешает при
+  // старте страницы, — у поздно вставленного блока её нет, и big
+  // разваливается. Вариант list из десктопной разметки в прилипшем
+  // состоянии рендерится ровно как родной мобильный бар
+  // «счётчик + В корзину», поэтому классы не переписываем.
+
   // видимый product-main с ценой — куда возвращать блок размера
   function findSkuRestoreHost() {
     var mains = document.querySelectorAll('.product-main');
