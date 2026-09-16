@@ -378,12 +378,36 @@
     skuKeeps.push({ propId: propId, box: box, wrapOuter: wrapOuter, tpl: tpl, buyEl: buyEl });
   }
 
-  // Замечание про вид кнопки: родной мобильный шаблон Аспро использует
-  // counter_wrapp big, но big требует JS-обвязки, которую Аспро вешает при
-  // старте страницы, — у поздно вставленного блока её нет, и big
-  // разваливается. Вариант list из десктопной разметки в прилипшем
-  // состоянии рендерится ровно как родной мобильный бар
-  // «счётчик + В корзину», поэтому классы не переписываем.
+  // Вставка блока покупки с приведением к родному мобильному виду.
+  // В родном шаблоне блок обёрнут в .buy_block, а «прилипший» вид ему
+  // придаёт аспровская setFixedBuyBlock() (classList: buy_block →
+  // +catalog_block, counter_wrapp → −list +fixed). Она запускается на
+  // ready/resize — РАНЬШЕ нашей вставки, поэтому полагаться на неё нельзя
+  // (кнопка оставалась «десктопной» пилюлей, если после вставки не было
+  // ресайза). Вызываем её сами, а если её нет — ставим классы напрямую.
+  // Класс big не трогаем: без JS-обвязки Аспро он разваливает вёрстку.
+  function mountBuyBlock(buyEl, pricesEl) {
+    // всегда СВЕЖАЯ обёртка: старый .buy_block из отсоединённого дерева
+    // тянет за собой лишние десктопные блоки (доставка, подарок и т.п.)
+    var wrap = h('div', 'buy_block');
+    wrap.appendChild(buyEl); // заодно вынимает buyEl из старого дерева
+    pricesEl.parentNode.insertBefore(wrap, pricesEl.nextSibling);
+    var applied = false;
+    if (typeof window.setFixedBuyBlock === 'function') {
+      try {
+        window.setFixedBuyBlock();
+        applied = true;
+      } catch (e) { /* страховка ниже */ }
+    }
+    if (!applied && isMobile()) {
+      wrap.classList.add('catalog_block');
+      var cw = buyEl.querySelector('.counter_wrapp');
+      if (cw) {
+        cw.classList.remove('list');
+        cw.classList.add('fixed');
+      }
+    }
+  }
 
   // видимый product-main с ценой — куда возвращать блок размера
   function findSkuRestoreHost() {
@@ -422,7 +446,7 @@
         // блок покупки («В корзину», «Купить в 1 клик») композит тоже вырезал
         var buy = doc.querySelector('.offer_buy_block');
         if (buy && !s.host.querySelector('.offer_buy_block, .to-cart, .basket_item_add')) {
-          s.pricesEl.parentNode.insertBefore(document.importNode(buy, true), s.pricesEl.nextSibling);
+          mountBuyBlock(document.importNode(buy, true), s.pricesEl);
         }
         rescan(); // штатный конвейер построит пикер по вставленному блоку
       })
@@ -474,7 +498,7 @@
       }
       if (k.buyEl && !document.body.contains(k.buyEl) &&
           !spot.host.querySelector('.offer_buy_block, .to-cart, .basket_item_add')) {
-        pricesEl.parentNode.insertBefore(k.buyEl, pricesEl.nextSibling);
+        mountBuyBlock(k.buyEl, pricesEl);
       }
     }
     // восстановить нечем (скрипт исполнился позже зачистки композитом,
