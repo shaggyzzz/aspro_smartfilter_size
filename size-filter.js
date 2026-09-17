@@ -356,7 +356,53 @@
   // и будет менять цену ajax-ом, как на десктопе.
   var skuKeeps = [];
 
+  // Блок .bx_item_detail_size на детальной есть не в одном экземпляре:
+  //  • мини-карточка фиксированной шапки — Аспро копирует туда class-строку
+  //    настоящего блока (setNewHeader), получается <ul><li> без селекта;
+  //  • карточки товаров в слайдерах «Просмотренные»/«Похожие» — полноценные
+  //    блоки, но ЧУЖИХ товаров.
+  // Проверка «блок уже на месте» обязана считать только блок самой карточки,
+  // иначе она срабатывает на копии, вырезанный композитом настоящий блок не
+  // возвращается, и карточка остаётся без выбора размера и без кнопок
+  // покупки (плавающий баг: 3 отказа на 24 перезагрузки).
+  // Различаем штатными метками Аспро: sku_in_detail — карточка товара,
+  // sku_in_section — карточка в листинге/слайдере.
+  function inFixedHeader(box) {
+    return !!(box && box.closest && box.closest('#headerfixed'));
+  }
+
+  function isDetailSkuBox(box) {
+    if (!box || !box.closest) return false;
+    if (inFixedHeader(box)) return false;
+    if (box.closest('.sku_in_detail')) return true;
+    if (box.closest('.sku_in_section')) return false;
+    // запасной признак, если меток нет: блок внутри карточки товара
+    return !!box.closest('.product-main, .product-container');
+  }
+
+  // живой блок размера САМОЙ карточки товара, если он есть в документе
+  function findRealSkuBox() {
+    var boxes = document.querySelectorAll('.bx_item_detail_size');
+    for (var i = 0; i < boxes.length; i++) {
+      if (isDetailSkuBox(boxes[i])) return boxes[i];
+    }
+    return null;
+  }
+
+  // хоть один захваченный блок ещё в документе (композит его не тронул)
+  function anySkuKeepAlive() {
+    for (var i = 0; i < skuKeeps.length; i++) {
+      var w = skuKeeps[i].wrapOuter;
+      if (w && document.body && document.body.contains(w)) return true;
+    }
+    return false;
+  }
+
   function registerSkuKeep(box, skuWrap, propId) {
+    // храним только блок самой карточки: копию из шапки восстанавливать
+    // нечем и незачем, а карточку из слайдера нельзя вставлять в карточку
+    // товара — это чужой товар
+    if (!isDetailSkuBox(box)) return;
     var wrapOuter = null;
     if (skuWrap && skuWrap.closest) wrapOuter = skuWrap.closest('.sku_props');
     wrapOuter = wrapOuter || skuWrap || box;
@@ -423,16 +469,21 @@
   // оптимизатор Аспро отложил наш скрипт) — забираем полный HTML страницы
   // повторным запросом (сервер отдаёт его с блоком размера даже когда
   // композит на клиенте вырезал блок) и вставляем нужные узлы из него.
-  var skuFetchTried = false;
+  // Счётчик, а не флаг: попытка засчитывается до ответа, поэтому сетевой
+  // сбой не должен выжигать этот слой обороны навсегда — но и повторять
+  // без конца нельзя, иначе неудачные триггеры устроят шквал запросов
+  var skuFetchAttempts = 0;
+  var SKU_FETCH_MAX_ATTEMPTS = 2;
   function fetchSkuFallback() {
-    if (skuFetchTried || !window.fetch || !window.DOMParser) return;
+    if (skuFetchAttempts >= SKU_FETCH_MAX_ATTEMPTS || !window.fetch || !window.DOMParser) return;
     var spot = findSkuRestoreHost();
     if (!spot) return;
-    skuFetchTried = true;
+    skuFetchAttempts++;
     fetch(location.href, { credentials: 'same-origin' })
       .then(function (r) { return r.text(); })
       .then(function (html) {
-        if (document.querySelector('.bx_item_detail_size')) return;
+        // за время запроса блок мог вернуться сам — не создаём дубль
+        if (findRealSkuBox() || anySkuKeepAlive()) return;
         var doc = new DOMParser().parseFromString(html, 'text/html');
         var box = doc.querySelector('.bx_item_detail_size');
         if (!box) return;
@@ -456,8 +507,9 @@
   function restoreSkuBlocks() {
     var restored = 0;
     if (!document.body) return restored;
-    // блок жив (или уже восстановлен, или композит принёс свежий) — не мешаем
-    if (document.querySelector('.bx_item_detail_size')) return restored;
+    // настоящий блок жив (или уже восстановлен, или композит принёс свежий) —
+    // не мешаем. Копия в шапке и карточки слайдеров не в счёт: isDetailSkuBox
+    if (findRealSkuBox()) return restored;
     for (var i = 0; i < skuKeeps.length; i++) {
       var k = skuKeeps[i];
       if (!k.wrapOuter || document.body.contains(k.wrapOuter)) continue;
@@ -502,8 +554,9 @@
       }
     }
     // восстановить нечем (скрипт исполнился позже зачистки композитом,
-    // захват не успел) — дотянуть блок повторным запросом страницы
-    if (!restored) fetchSkuFallback();
+    // захват не успел) — дотянуть блок повторным запросом страницы.
+    // Если захваченный блок ещё жив, вырезания не было: запрос не нужен
+    if (!restored && !anySkuKeepAlive()) fetchSkuFallback();
     return restored;
   }
 
@@ -1377,6 +1430,9 @@
       restoreSkuBlocks();
       var skuBoxes = document.querySelectorAll('.bx_item_detail_size');
       Array.prototype.forEach.call(skuBoxes, function (box) {
+        // копию в шапке не трогаем: пикер в ней всё равно не построить
+        // (один <li>, без селекта), а лишние отметки только зашумляют DOM
+        if (inFixedHeader(box)) return;
         try {
           enhanceSku(box, C);
         } catch (e) {
@@ -1494,7 +1550,7 @@
             if (skuKeeps.length &&
                 ((n.matches && n.matches('.prices_block, .product-main')) ||
                  (n.querySelector && n.querySelector('.prices_block'))) &&
-                !document.querySelector('.bx_item_detail_size')) {
+                !findRealSkuBox()) {
               rescan();
               return;
             }
@@ -1507,7 +1563,7 @@
             if (skuKeeps.length &&
                 ((rn.matches && rn.matches('.bx_item_detail_size')) ||
                  (rn.querySelector && rn.querySelector('.bx_item_detail_size'))) &&
-                !document.querySelector('.bx_item_detail_size')) {
+                !findRealSkuBox()) {
               rescan();
               return;
             }
